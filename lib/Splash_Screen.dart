@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-
 import 'Home_Screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -62,7 +61,6 @@ class _SplashScreenState extends State<SplashScreen> {
               child: SizedBox(
                 width: double.infinity,
                 height: 60,
-                // button removed (not needed if auto move)
                 child: Center(
                   child: CircularProgressIndicator(color: Color(0xff5f9658)),
                 ),

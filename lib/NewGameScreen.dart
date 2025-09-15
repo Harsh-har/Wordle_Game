@@ -211,7 +211,6 @@ class _GameScreenState extends State<GameScreen> {
   Future<void> _saveGame() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Serialize grid state
     final gridState = StringBuffer();
     for (int row = 0; row < 6; row++) {
       for (int col = 0; col < 5; col++) {
@@ -292,7 +291,7 @@ class _GameScreenState extends State<GameScreen> {
       guessedWord += _grid[_currentRow][i].value;
     }
 
-    // Check each letter
+
     for (int i = 0; i < 5; i++) {
       String letter = _grid[_currentRow][i].value;
       if (_targetWord[i] == letter) {
@@ -320,46 +319,6 @@ class _GameScreenState extends State<GameScreen> {
     });
 
     _saveGame();
-  }
-
-  void _pauseGame() {
-    setState(() {
-      _isPaused = true;
-      _timer?.cancel();
-    });
-
-    _saveGame();
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF2D2D2D),
-        title: const Text('Game Paused', style: TextStyle(color: Colors.white)),
-        content: const Text('Your progress has been saved.', style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() {
-                _isPaused = false;
-              });
-              if (widget.isTimedMode && !_gameOver) {
-                _startTimer();
-              }
-            },
-            child: const Text('Resume', style: TextStyle(color: Colors.blue)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            child: const Text('Quit', style: TextStyle(color: Colors.white70)),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showTimeUpDialog() {
@@ -445,38 +404,190 @@ class _GameScreenState extends State<GameScreen> {
 
   void _shareScore() {
     String result = '';
+    String visualScore = '';
+
     for (int row = 0; row <= _currentRow; row++) {
       for (int col = 0; col < 5; col++) {
         switch (_grid[row][col].status) {
           case LetterStatus.correct:
             result += '🟩';
+            visualScore += '🟩';
             break;
           case LetterStatus.present:
             result += '🟨';
+            visualScore += '🟨';
             break;
           case LetterStatus.absent:
             result += '⬛';
+            visualScore += '⬛';
             break;
           default:
             result += '⬜';
+            visualScore += '⬜';
         }
       }
       result += '\n';
+      visualScore += '\n';
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text("Score copied to clipboard!"),
+    // Create a beautiful score message
+    String scoreMessage = '''
+🎯 WORDLE PRO 🎯
+
+${_gameOver && _grid[_currentRow][0].status != LetterStatus.empty ? 'Round: ${_currentRow + 1}/6' : 'Game in progress'}
+
+$visualScore
+
+${_gameOver ? (_grid[_currentRow][0].status == LetterStatus.correct ? '✅ Victory!' : '❌ Game Over') : '⏳ Still playing'}
+${widget.isTimedMode ? '⏱ Time: ${widget.timeLimit!} seconds' : ''}
+
+#Harsh #Singhal
+''';
+
+    Clipboard.setData(ClipboardData(text: scoreMessage));
+
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF2D2D2D),
-        action: SnackBarAction(
-          label: 'OK',
-          onPressed: () {},
+        title: const Row(
+          children: [
+            Icon(Icons.share, color: Colors.blue, size: 24),
+            SizedBox(width: 10),
+            Text('Share Your Score', style: TextStyle(color: Colors.white)),
+          ],
         ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Your score has been copied to clipboard:',
+                  style: TextStyle(color: Colors.white70)),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF3A3A3A), width: 1),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const Text('WORDLE PRO',
+                        style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 8),
+                    Text(
+                      _gameOver && _grid[_currentRow][0].status != LetterStatus.empty
+                          ? 'Round: ${_currentRow + 1}/6'
+                          : 'Game in progress',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    const SizedBox(height: 12),
+                    // Visual score display
+                    ...List.generate(_currentRow + 1, (row) {
+                      return Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(5, (col) {
+                          Color boxColor;
+                          switch (_grid[row][col].status) {
+                            case LetterStatus.correct:
+                              boxColor = const Color(0xFF538D4E);
+                              break;
+                            case LetterStatus.present:
+                              boxColor = const Color(0xFFB59F3B);
+                              break;
+                            case LetterStatus.absent:
+                              boxColor = const Color(0xFF3A3A3A);
+                              break;
+                            default:
+                              boxColor = const Color(0xFF1E1E1E);
+                          }
+
+                          return Container(
+                            width: 20,
+                            height: 20,
+                            margin: const EdgeInsets.symmetric(horizontal: 2),
+                            decoration: BoxDecoration(
+                              color: boxColor,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: const Color(0xFF3A3A3A),
+                                width: 1,
+                              ),
+                            ),
+                          );
+                        }),
+                      );
+                    }),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _gameOver
+                              ? (_grid[_currentRow][0].status == LetterStatus.correct
+                              ? Icons.check_circle
+                              : Icons.cancel)
+                              : Icons.timer,
+                          color: _gameOver
+                              ? (_grid[_currentRow][0].status == LetterStatus.correct
+                              ? Colors.green
+                              : Colors.red)
+                              : Colors.blue,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _gameOver
+                              ? (_grid[_currentRow][0].status == LetterStatus.correct
+                              ? 'Victory!'
+                              : 'Game Over')
+                              : 'Still playing',
+                          style: TextStyle(
+                            color: _gameOver
+                                ? (_grid[_currentRow][0].status == LetterStatus.correct
+                                ? Colors.green
+                                : Colors.red)
+                                : Colors.blue,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (widget.isTimedMode) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.timer, color: Colors.blue, size: 14),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Time: ${widget.timeLimit!}s',
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Paste anywhere to share your achievement!',
+                  style: TextStyle(color: Colors.white70, fontSize: 12)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK', style: TextStyle(color: Colors.blue)),
+          ),
+        ],
       ),
     );
-
-    // Copy to clipboard
-    Clipboard.setData(ClipboardData(text: 'Wordle Pro Score:\n$result'));
   }
 
   @override
@@ -532,7 +643,7 @@ class _GameScreenState extends State<GameScreen> {
             const Spacer(),
             _buildKeyboard(),
             const SizedBox(height: 24),
-            _buildActionButtons(),
+            _buildShareButton(),
             const SizedBox(height: 16),
           ],
         ),
@@ -683,35 +794,19 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
-  Widget _buildActionButtons() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        ElevatedButton.icon(
-          onPressed: _pauseGame,
-          icon: const Icon(Icons.pause_circle_outline_rounded, size: 20),
-          label: const Text("Pause"),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF2D2D2D),
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-          ),
+  Widget _buildShareButton() {
+    return ElevatedButton.icon(
+      onPressed: _shareScore,
+      icon: const Icon(Icons.share_rounded, size: 20),
+      label: const Text("Share Score"),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF2D2D2D),
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
         ),
-        ElevatedButton.icon(
-          onPressed: _shareScore,
-          icon: const Icon(Icons.share_rounded, size: 20),
-          label: const Text("Share"),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF2D2D2D),
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-          ),
-        ),
-      ],
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      ),
     );
   }
 }

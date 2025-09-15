@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/material.dart';
-
 import 'Splash_Screen.dart';
-  // Your custom splash screen
+
 
 void main() async {
 
@@ -16,7 +14,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: "Stock T20",
+      title: "Wordle App",
       theme: ThemeData(primarySwatch: Colors.green),
       home: const SplashScreen(),
     );
