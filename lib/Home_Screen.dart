@@ -1,10 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import 'NewGameScreen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -28,6 +27,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// Home Screen
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -57,7 +57,6 @@ class _HomeScreenState extends State<HomeScreen> {
           _hasSavedGame = true;
         });
       } else {
-
         await _prefs.remove('saved_game');
         setState(() {
           _hasSavedGame = false;
@@ -156,7 +155,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     context,
                     MaterialPageRoute(builder: (_) => const TimedModeScreen()),
                   ).then((_) {
-                    // Check for saved game again when returning from game
                     _checkForSavedGame();
                   });
                 },
@@ -214,6 +212,88 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+// New Game Screen
+class NewGameScreen extends StatelessWidget {
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: const Text(
+          'New Game',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              "Standard Wordle",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              "Guess the word in 6 tries.\nNo time limit.",
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 16,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 40),
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => GameScreen(isTimedMode: false),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E1E1E),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 4,
+                ),
+                child: const Text(
+                  'Start Game',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Timed Mode Screen
 class TimedModeScreen extends StatefulWidget {
   const TimedModeScreen({super.key});
 
@@ -318,7 +398,9 @@ class _TimedModeScreenState extends State<TimedModeScreen> {
   }
 }
 
+
 class GameScreen extends StatefulWidget {
+
   final bool isTimedMode;
   final int? timeLimit;
   final Map<String, dynamic>? savedGameState;
@@ -334,21 +416,58 @@ class GameScreen extends StatefulWidget {
   State<GameScreen> createState() => _GameScreenState();
 }
 
-class _GameScreenState extends State<GameScreen> {
+class _GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   int _remainingTime = 60;
   late List<List<Letter>> _grid;
   int _currentRow = 0;
   int _currentCol = 0;
-  String _targetWord = "FLUTTER";
+  int _score = 0;
+
+  late String _targetWord;
   Timer? _timer;
   bool _isPaused = false;
   bool _gameOver = false;
   bool _gameWon = false;
   late SharedPreferences _prefs;
+  final List<String> wordList = [
+    "FLUTE",
+    "CRANE",
+    "PLANT",
+    "BRAVE",
+    "STONE",
+    "GLASS",
+    "MOUSE",
+    "HEART",
+    "LIGHT",
+    "SWORD"
+  ];
+  String _generateSquares() {
+    String result = '';
+    for (int row = 0; row <= _currentRow; row++) {
+      for (int col = 0; col < 5; col++) {
+        switch (_grid[row][col].status) {
+          case LetterStatus.correct:
+            result += '🟩';
+            break;
+          case LetterStatus.present:
+            result += '🟨';
+            break;
+          case LetterStatus.absent:
+            result += '⬛';
+            break;
+          default:
+            result += '⬜';
+        }
+      }
+      result += '\n';
+    }
+    return result;
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializePreferences();
 
     if (widget.savedGameState != null) {
@@ -356,29 +475,52 @@ class _GameScreenState extends State<GameScreen> {
     } else {
       _remainingTime = widget.timeLimit ?? 60;
       _initializeGrid();
-    }
+      _targetWord = wordList[Random().nextInt(wordList.length)];
 
-    // Start timer immediately for timed mode if not paused
-    if (widget.isTimedMode && !_isPaused) {
-      _startTimer();
+      if (widget.isTimedMode && !_isPaused && !_gameOver) {
+        _startTimer();
+      }
     }
   }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _saveGame();
+    super.dispose();
+  }
+
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (widget.isTimedMode && _isPaused && !_gameOver) {
+        _resumeGame();
+      }
+    } else if (state == AppLifecycleState.paused) {
+      _pauseGame();
+    }
+  }
+
+
+
 
   Future<void> _initializePreferences() async {
     _prefs = await SharedPreferences.getInstance();
   }
-
   void _loadSavedGame() {
     final savedState = widget.savedGameState!;
     setState(() {
+
       _remainingTime = savedState['remainingTime'];
       _currentRow = savedState['currentRow'];
       _currentCol = savedState['currentCol'];
-      _gameOver = savedState['gameOver'];
-      _gameWon = savedState['gameWon'];
-      _isPaused = savedState['isPaused'] ?? false;
+      _gameOver    = savedState['gameOver'];
+      _gameWon     = savedState['gameWon'];
 
-      // Reconstruct grid from saved data
+      _isPaused    = savedState['isPaused'] ?? false;
+
+
       _grid = List.generate(6, (row) {
         return List.generate(5, (col) {
           final letterData = savedState['grid'][row][col];
@@ -389,10 +531,80 @@ class _GameScreenState extends State<GameScreen> {
         });
       });
     });
+
+
+    if (widget.isTimedMode && !_gameOver) {
+      _isPaused = false;
+      _startTimer();
+    }
   }
 
+
+
+  void _resumeGame() {
+    if (_gameOver) return;
+
+    setState(() {
+      _isPaused = false;
+    });
+
+    _startTimer();
+  }
+
+
+  void _pauseGame() {
+    if (_gameOver) return;
+
+    setState(() {
+      _isPaused = true;
+    });
+
+    _timer?.cancel();
+    _saveGame();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF2D2D2D),
+        title: const Text('Game Paused', style: TextStyle(color: Colors.white)),
+        content: const Text('You can resume the game later from home screen', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              // Navigator.pop(context);
+              SystemNavigator.pop();
+
+            },
+            child: const Text('OK', style: TextStyle(color: Colors.blue)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _calculateScore() {
+    int baseScore = 100;
+    int timeBonus = widget.isTimedMode ? _remainingTime * 2 : 0;
+    int attemptBonus = (6 - _currentRow) * 10;
+
+    _score = baseScore + timeBonus + attemptBonus;
+
+    return """
+Round: ${_currentRow + 1}/6
+
+${_generateSquares()}
+
+✅ Victory!
+
+Score: $_score
+  """;
+  }
+
+
+
   Future<void> _saveGame() async {
-    if (_gameOver) return; // Don't save if game is over
+    if (_gameOver) return;
 
     final gameState = {
       'isTimedMode': widget.isTimedMode,
@@ -409,74 +621,40 @@ class _GameScreenState extends State<GameScreen> {
             'status': letter.status.index
           }).toList()
       ).toList(),
+      'targetWord': _targetWord,
     };
+
 
     await _prefs.setString('saved_game', json.encode(gameState));
   }
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    if (!_gameOver) {
-      _saveGame(); // Save game when leaving screen
-    } else {
-      _prefs.remove('saved_game'); // Remove saved game if it's over
-    }
-    super.dispose();
-  }
 
   void _initializeGrid() {
     _grid = List.generate(6, (row) {
       return List.generate(5, (col) => Letter('', LetterStatus.empty));
     });
   }
-
   void _startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!_isPaused && !_gameOver && mounted) {
-        setState(() {
-          if (_remainingTime > 0) {
+        if (_remainingTime > 0) {
+          setState(() {
             _remainingTime--;
-            _saveGame(); // Auto-save every second
-          } else {
-            _timer?.cancel();
+          });
+          _saveGame();
+        } else {
+          _timer?.cancel();
+          setState(() {
             _gameOver = true;
-            _showTimeUpDialog();
-          }
-        });
+          });
+          _showTimeUpDialog();
+        }
       }
     });
   }
 
-  void _pauseGame() {
-    if (_gameOver) return;
 
-    setState(() {
-      _isPaused = true;
-    });
-
-    _saveGame(); // Save when pausing
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF2D2D2D),
-        title: const Text('Game Paused', style: TextStyle(color: Colors.white)),
-        content: const Text('Return to home screen to resume later', style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            child: const Text('OK', style: TextStyle(color: Colors.blue)),
-          ),
-        ],
-      ),
-    );
-  }
 
   void _onKeyPressed(String key) {
     if (_gameOver || _isPaused) return;
@@ -489,15 +667,21 @@ class _GameScreenState extends State<GameScreen> {
       _addLetter(key);
     }
 
-    _saveGame(); // Save after each key press
+    _saveGame();
   }
 
+
+
+
   void _addLetter(String letter) {
-    setState(() {
-      _grid[_currentRow][_currentCol] = Letter(letter, LetterStatus.untried);
-      _currentCol++;
-    });
+    if (_currentCol < 5 && _grid[_currentRow][_currentCol].value.isEmpty) {
+      setState(() {
+        _grid[_currentRow][_currentCol] = Letter(letter, LetterStatus.untried);
+        _currentCol++;
+      });
+    }
   }
+
 
   void _deleteLetter() {
     if (_currentCol > 0) {
@@ -507,16 +691,14 @@ class _GameScreenState extends State<GameScreen> {
       });
     }
   }
-
   void _checkWord() {
-    if (_currentCol < 5) return; // Word not complete
+    if (_currentCol < 5 || _gameOver || _isPaused) return;
 
     String guessedWord = '';
     for (int i = 0; i < 5; i++) {
       guessedWord += _grid[_currentRow][i].value;
     }
 
-    // Check each letter
     for (int i = 0; i < 5; i++) {
       String letter = _grid[_currentRow][i].value;
       if (_targetWord[i] == letter) {
@@ -533,24 +715,27 @@ class _GameScreenState extends State<GameScreen> {
         _gameOver = true;
         _gameWon = true;
         _timer?.cancel();
-        _prefs.remove('saved_game'); // Remove saved game when won
+        _prefs.remove('saved_game');
         _showWinDialog();
       } else if (_currentRow == 5) {
         _gameOver = true;
         _timer?.cancel();
-        _prefs.remove('saved_game'); // Remove saved game when lost
+        _prefs.remove('saved_game');
         _showLoseDialog();
       } else {
-        _currentRow++;
-        _currentCol = 0;
+        if (!_gameOver) {
+          _currentRow++;
+          _currentCol = 0;
+        }
       }
     });
 
-    _saveGame(); // Save after checking word
+    _saveGame();
   }
 
+
   void _showTimeUpDialog() {
-    _prefs.remove('saved_game'); // Remove saved game when time's up
+    _prefs.remove('saved_game');
 
     showDialog(
       context: context,
@@ -572,34 +757,46 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
+
   void _showWinDialog() {
+    String message = _calculateScore();
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF2D2D2D),
-        title: const Text('You Win!', style: TextStyle(color: Colors.white)),
-        content: Text('You guessed the word in ${_currentRow + 1} ${_currentRow + 1 == 1 ? 'try' : 'tries'}!',
-            style: const TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () {
-              _shareScore();
-              Navigator.pop(context);
-            },
-            child: const Text('Share', style: TextStyle(color: Colors.blue)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            child: const Text('OK', style: TextStyle(color: Colors.white70)),
-          ),
-        ],
+        title: Row(
+          children: const [
+            Icon(Icons.emoji_events, color: Colors.amber, size: 32),
+            SizedBox(width: 10),
+            Text("You Win!", style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+        ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                _shareScore();
+                Navigator.pop(context);
+              },
+              child: const Text('Share', style: TextStyle(color: Colors.blue)),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.pop(context);
+              },
+              child: const Text('OK', style: TextStyle(color: Colors.white70)),
+            ),
+          ],
       ),
     );
   }
+
 
   void _showLoseDialog() {
     showDialog(
@@ -630,25 +827,9 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _shareScore() {
-    String result = '';
-    for (int row = 0; row <= _currentRow; row++) {
-      for (int col = 0; col < 5; col++) {
-        switch (_grid[row][col].status) {
-          case LetterStatus.correct:
-            result += '🟩';
-            break;
-          case LetterStatus.present:
-            result += '🟨';
-            break;
-          case LetterStatus.absent:
-            result += '⬛';
-            break;
-          default:
-            result += '⬜';
-        }
-      }
-      result += '\n';
-    }
+    String message = _calculateScore();
+
+    Clipboard.setData(ClipboardData(text: "Wordle Pro\n$message"));
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -656,9 +837,8 @@ class _GameScreenState extends State<GameScreen> {
         backgroundColor: Color(0xFF2D2D2D),
       ),
     );
-
-    Clipboard.setData(ClipboardData(text: 'Wordle Pro Score:\n$result'));
   }
+
 
   @override
   Widget build(BuildContext context) {
