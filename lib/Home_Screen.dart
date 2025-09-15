@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'NewGameScreen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -33,6 +36,47 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  bool _hasSavedGame = false;
+  late SharedPreferences _prefs;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkForSavedGame();
+  }
+
+  Future<void> _checkForSavedGame() async {
+    _prefs = await SharedPreferences.getInstance();
+    final savedGame = _prefs.getString('saved_game');
+
+    if (savedGame != null) {
+      final gameData = json.decode(savedGame);
+
+      if (!gameData['gameOver']) {
+        setState(() {
+          _hasSavedGame = true;
+        });
+      } else {
+
+        await _prefs.remove('saved_game');
+        setState(() {
+          _hasSavedGame = false;
+        });
+      }
+    } else {
+      setState(() {
+        _hasSavedGame = false;
+      });
+    }
+  }
+
+  Future<void> _clearSavedGame() async {
+    await _prefs.remove('saved_game');
+    setState(() {
+      _hasSavedGame = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -62,22 +106,60 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const Spacer(),
+
+              if (_hasSavedGame) ...[
+                _buildGameButton(
+                  text: 'Resume Game',
+                  icon: Icons.replay_rounded,
+                  onPressed: () async {
+                    final savedGame = _prefs.getString('saved_game');
+                    if (savedGame != null) {
+                      final gameData = json.decode(savedGame);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => GameScreen(
+                            isTimedMode: gameData['isTimedMode'],
+                            timeLimit: gameData['timeLimit'],
+                            savedGameState: gameData,
+                          ),
+                        ),
+                      ).then((_) {
+                        _checkForSavedGame();
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
+
               _buildGameButton(
                 text: 'New Game',
                 icon: Icons.play_arrow_rounded,
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => GameScreen(isTimedMode: false)),
-                ),
+                onPressed: () {
+                  _clearSavedGame();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => NewGameScreen()),
+                  ).then((_) {
+                    _checkForSavedGame();
+                  });
+                },
               ),
               const SizedBox(height: 16),
               _buildGameButton(
                 text: 'Timed Mode',
                 icon: Icons.timer_rounded,
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const TimedModeScreen()),
-                ),
+                onPressed: () {
+                  _clearSavedGame();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const TimedModeScreen()),
+                  ).then((_) {
+                    // Check for saved game again when returning from game
+                    _checkForSavedGame();
+                  });
+                },
               ),
               const Spacer(flex: 2),
               const Text(
@@ -239,11 +321,13 @@ class _TimedModeScreenState extends State<TimedModeScreen> {
 class GameScreen extends StatefulWidget {
   final bool isTimedMode;
   final int? timeLimit;
+  final Map<String, dynamic>? savedGameState;
 
   const GameScreen({
     super.key,
     this.isTimedMode = false,
     this.timeLimit,
+    this.savedGameState,
   });
 
   @override
@@ -260,22 +344,84 @@ class _GameScreenState extends State<GameScreen> {
   bool _isPaused = false;
   bool _gameOver = false;
   bool _gameWon = false;
+  late SharedPreferences _prefs;
 
   @override
   void initState() {
     super.initState();
-    _remainingTime = widget.timeLimit ?? 60;
-    _initializeGrid();
+    _initializePreferences();
 
-    // Start timer immediately for timed mode
-    if (widget.isTimedMode) {
+    if (widget.savedGameState != null) {
+      _loadSavedGame();
+    } else {
+      _remainingTime = widget.timeLimit ?? 60;
+      _initializeGrid();
+    }
+
+    // Start timer immediately for timed mode if not paused
+    if (widget.isTimedMode && !_isPaused) {
       _startTimer();
     }
+  }
+
+  Future<void> _initializePreferences() async {
+    _prefs = await SharedPreferences.getInstance();
+  }
+
+  void _loadSavedGame() {
+    final savedState = widget.savedGameState!;
+    setState(() {
+      _remainingTime = savedState['remainingTime'];
+      _currentRow = savedState['currentRow'];
+      _currentCol = savedState['currentCol'];
+      _gameOver = savedState['gameOver'];
+      _gameWon = savedState['gameWon'];
+      _isPaused = savedState['isPaused'] ?? false;
+
+      // Reconstruct grid from saved data
+      _grid = List.generate(6, (row) {
+        return List.generate(5, (col) {
+          final letterData = savedState['grid'][row][col];
+          return Letter(
+              letterData['value'],
+              LetterStatus.values[letterData['status']]
+          );
+        });
+      });
+    });
+  }
+
+  Future<void> _saveGame() async {
+    if (_gameOver) return; // Don't save if game is over
+
+    final gameState = {
+      'isTimedMode': widget.isTimedMode,
+      'timeLimit': widget.timeLimit,
+      'remainingTime': _remainingTime,
+      'currentRow': _currentRow,
+      'currentCol': _currentCol,
+      'gameOver': _gameOver,
+      'gameWon': _gameWon,
+      'isPaused': _isPaused,
+      'grid': _grid.map((row) =>
+          row.map((letter) => {
+            'value': letter.value,
+            'status': letter.status.index
+          }).toList()
+      ).toList(),
+    };
+
+    await _prefs.setString('saved_game', json.encode(gameState));
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    if (!_gameOver) {
+      _saveGame(); // Save game when leaving screen
+    } else {
+      _prefs.remove('saved_game'); // Remove saved game if it's over
+    }
     super.dispose();
   }
 
@@ -292,6 +438,7 @@ class _GameScreenState extends State<GameScreen> {
         setState(() {
           if (_remainingTime > 0) {
             _remainingTime--;
+            _saveGame(); // Auto-save every second
           } else {
             _timer?.cancel();
             _gameOver = true;
@@ -309,39 +456,26 @@ class _GameScreenState extends State<GameScreen> {
       _isPaused = true;
     });
 
+    _saveGame(); // Save when pausing
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF2D2D2D),
         title: const Text('Game Paused', style: TextStyle(color: Colors.white)),
-        content: const Text('Take your time!', style: TextStyle(color: Colors.white70)),
+        content: const Text('Return to home screen to resume later', style: TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              setState(() {
-                _isPaused = false;
-              });
-            },
-            child: const Text('Resume', style: TextStyle(color: Colors.blue)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
               Navigator.pop(context);
             },
-            child: const Text('Quit', style: TextStyle(color: Colors.white70)),
+            child: const Text('OK', style: TextStyle(color: Colors.blue)),
           ),
         ],
       ),
     );
-  }
-
-  void _resumeGame() {
-    setState(() {
-      _isPaused = false;
-    });
   }
 
   void _onKeyPressed(String key) {
@@ -354,6 +488,8 @@ class _GameScreenState extends State<GameScreen> {
     } else if (_currentCol < 5) {
       _addLetter(key);
     }
+
+    _saveGame(); // Save after each key press
   }
 
   void _addLetter(String letter) {
@@ -397,19 +533,25 @@ class _GameScreenState extends State<GameScreen> {
         _gameOver = true;
         _gameWon = true;
         _timer?.cancel();
+        _prefs.remove('saved_game'); // Remove saved game when won
         _showWinDialog();
       } else if (_currentRow == 5) {
         _gameOver = true;
         _timer?.cancel();
+        _prefs.remove('saved_game'); // Remove saved game when lost
         _showLoseDialog();
       } else {
         _currentRow++;
         _currentCol = 0;
       }
     });
+
+    _saveGame(); // Save after checking word
   }
 
   void _showTimeUpDialog() {
+    _prefs.remove('saved_game'); // Remove saved game when time's up
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -727,12 +869,9 @@ class _GameScreenState extends State<GameScreen> {
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         ElevatedButton.icon(
-          onPressed: _isPaused ? _resumeGame : _pauseGame,
-          icon: Icon(
-            _isPaused ? Icons.play_arrow_rounded : Icons.pause_circle_outline_rounded,
-            size: 20,
-          ),
-          label: Text(_isPaused ? "Resume" : "Pause"),
+          onPressed: _pauseGame,
+          icon: const Icon(Icons.pause_circle_outline_rounded, size: 20),
+          label: const Text("Pause"),
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF2D2D2D),
             foregroundColor: Colors.white,
